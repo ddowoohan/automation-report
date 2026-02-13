@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 40 30% 98%;
+  --foreground: 20 15% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 20 15% 12%;
+  --primary: 14 70% 45%;
+  --primary-foreground: 35 100% 97%;
+  --muted: 35 25% 92%;
+  --muted-foreground: 24 10% 38%;
+  --accent: 173 44% 36%;
+  --accent-foreground: 173 60% 96%;
+  --border: 25 18% 84%;
+  --input: 25 18% 84%;
+  --ring: 14 70% 45%;
+  --radius: 0.85rem;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))] antialiased;
+  font-family: "SUIT", "Pretendard", "Apple SD Gothic Neo", sans-serif;
+  background-image:
+    radial-gradient(circle at 20% 10%, hsla(173, 44%, 36%, 0.08), transparent 35%),
+    radial-gradient(circle at 80% 90%, hsla(14, 70%, 45%, 0.1), transparent 40%);
+}
