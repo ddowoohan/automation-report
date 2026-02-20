@@ -1,4 +1,4 @@
-# Repository Guidelines
+co# Repository Guidelines
 
 ## Project Structure & Module Organization
 - Main app code lives in `src/` (Next.js App Router).

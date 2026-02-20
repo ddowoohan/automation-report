@@ -3,6 +3,7 @@ import type {
   AnalysisResult,
   BenchmarkMode,
   GrowthCustomer,
+  GrowthScatterSummary,
   KpiCard,
   MonthlyNewProduct,
   RegionStat
@@ -80,34 +81,103 @@ function averageByAgency(dataset: AnalysisDataset, agencies: string[]): { sales:
   };
 }
 
-function growthCustomers(dataset: AnalysisDataset, agency: string): GrowthCustomer[] {
-  const orders = agencyOrders(dataset, agency);
+interface CustomerMetric {
+  bizNo: string;
+  customerName: string;
+  agency: string;
+  firstOrderAmount: number;
+  cumulativeAmount: number;
+  purchaseCount: number;
+  growthMultiplier: number;
+}
 
-  const cumulativeByBiz = new Map<string, number>();
-  for (const order of orders) {
-    cumulativeByBiz.set(order.bizNo, (cumulativeByBiz.get(order.bizNo) ?? 0) + order.orderAmount);
+const MIN_FIRST_ORDER_AMOUNT_FOR_GROWTH_SCATTER = 1_000_000;
+const MIN_PURCHASE_COUNT_FOR_GROWTH_SCATTER = 2;
+
+function mean(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildCustomerMetrics(dataset: AnalysisDataset): CustomerMetric[] {
+  const cumulativeByCustomer = new Map<string, number>();
+  const orderCountByCustomer = new Map<string, number>();
+
+  for (const order of dataset.orders) {
+    const key = `${order.bizNo}::${order.agency}`;
+    cumulativeByCustomer.set(key, (cumulativeByCustomer.get(key) ?? 0) + order.orderAmount);
+    orderCountByCustomer.set(key, (orderCountByCustomer.get(key) ?? 0) + 1);
   }
 
-  const customers = dataset.customers.filter((customer) => customer.agency === agency);
-  const cumulativeValues = customers.map((customer) => cumulativeByBiz.get(customer.bizNo) ?? 0);
+  return dataset.customers.map((customer) => {
+    const key = `${customer.bizNo}::${customer.agency}`;
+    const cumulativeAmount = cumulativeByCustomer.get(key) ?? 0;
+    const purchaseCount = orderCountByCustomer.get(key) ?? 0;
+    const growthMultiplier = customer.firstOrderAmount > 0 ? cumulativeAmount / customer.firstOrderAmount : 0;
+
+    return {
+      bizNo: customer.bizNo,
+      customerName: customer.customerName || customer.bizNo,
+      agency: customer.agency,
+      firstOrderAmount: customer.firstOrderAmount,
+      cumulativeAmount,
+      purchaseCount,
+      growthMultiplier
+    };
+  });
+}
+
+function growthCustomers(metrics: CustomerMetric[], agency: string): GrowthCustomer[] {
+  const agencyMetrics = metrics.filter((metric) => metric.agency === agency);
+  const cumulativeValues = agencyMetrics.map((metric) => metric.cumulativeAmount);
   const threshold = percentile(cumulativeValues, 0.7);
 
-  return customers
-    .map((customer) => {
-      const cumulativeAmount = cumulativeByBiz.get(customer.bizNo) ?? 0;
-      const growthMultiplier = customer.firstOrderAmount > 0 ? cumulativeAmount / customer.firstOrderAmount : 0;
-      const highPotential = growthMultiplier >= 2 && cumulativeAmount >= threshold;
-
+  return agencyMetrics
+    .map((metric) => {
+      const highPotential = metric.growthMultiplier >= 2 && metric.cumulativeAmount >= threshold;
       return {
-        bizNo: customer.bizNo,
-        customerName: customer.customerName || customer.bizNo,
-        firstOrderAmount: customer.firstOrderAmount,
-        cumulativeAmount,
-        growthMultiplier,
+        bizNo: metric.bizNo,
+        customerName: metric.customerName,
+        agency: metric.agency,
+        firstOrderAmount: metric.firstOrderAmount,
+        cumulativeAmount: metric.cumulativeAmount,
+        purchaseCount: metric.purchaseCount,
+        growthMultiplier: metric.growthMultiplier,
         highPotential
       };
     })
     .sort((a, b) => b.cumulativeAmount - a.cumulativeAmount);
+}
+
+function buildGrowthScatter(metrics: CustomerMetric[], agency: string): GrowthScatterSummary {
+  const filtered = metrics.filter(
+    (metric) => metric.firstOrderAmount >= MIN_FIRST_ORDER_AMOUNT_FOR_GROWTH_SCATTER && metric.purchaseCount >= MIN_PURCHASE_COUNT_FOR_GROWTH_SCATTER
+  );
+
+  const points = filtered.map((metric) => ({
+    bizNo: metric.bizNo,
+    customerName: metric.customerName,
+    agency: metric.agency,
+    firstOrderAmount: metric.firstOrderAmount,
+    cumulativeAmount: metric.cumulativeAmount,
+    purchaseCount: metric.purchaseCount,
+    growthMultiplier: metric.growthMultiplier,
+    isSelectedAgency: metric.agency === agency
+  }));
+
+  const selected = points.filter((point) => point.isSelectedAgency);
+
+  return {
+    points,
+    averageGrowthMultiplier: mean(points.map((point) => point.growthMultiplier)),
+    averagePurchaseCount: mean(points.map((point) => point.purchaseCount)),
+    selectedAverageGrowthMultiplier: mean(selected.map((point) => point.growthMultiplier)),
+    selectedAveragePurchaseCount: mean(selected.map((point) => point.purchaseCount)),
+    minFirstOrderAmount: MIN_FIRST_ORDER_AMOUNT_FOR_GROWTH_SCATTER,
+    minPurchaseCount: MIN_PURCHASE_COUNT_FOR_GROWTH_SCATTER
+  };
 }
 
 function regionStatsFromOrders(orders: AnalysisDataset["orders"]): { all: RegionStat[]; main: RegionStat[]; expansion: RegionStat[] } {
@@ -244,7 +314,9 @@ function buildKpis(
 }
 
 export function calculateAnalysis(dataset: AnalysisDataset, agency: string, benchmark: BenchmarkMode): AnalysisResult {
-  const growthList = growthCustomers(dataset, agency);
+  const customerMetrics = buildCustomerMetrics(dataset);
+  const growthList = growthCustomers(customerMetrics, agency);
+  const growthScatter = buildGrowthScatter(customerMetrics, agency);
   const regions = regionStatsFromOrders(agencyOrders(dataset, agency));
   const b2bRegions = regionStatsFromOrders(dataset.orders);
 
@@ -257,6 +329,7 @@ export function calculateAnalysis(dataset: AnalysisDataset, agency: string, benc
     regionMain: regions.main,
     regionExpansion: regions.expansion,
     growthCustomers: growthList.slice(0, 20),
+    growthScatter,
     monthlyNewProducts: monthlyNewProducts(dataset, agency),
     crossSellRatio: crossSellRatio(dataset, agency)
   };

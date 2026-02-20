@@ -10,6 +10,17 @@ interface ParseCandidate {
   score: number;
 }
 
+export interface ParseCsvBufferOptions {
+  encodings?: readonly string[];
+  delimiters?: readonly string[];
+  exhaustive?: boolean;
+  includeMatrix?: boolean;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
 function textQualityScore(text: string): number {
   if (!text) {
     return -1000;
@@ -160,40 +171,75 @@ function isLikelyXlsx(buffer: ArrayBufferLike): boolean {
   return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
-export async function parseCsvFile(file: File): Promise<Record<string, string>[]> {
-  const buffer = await file.arrayBuffer();
-  return parseCsvBuffer(buffer);
-}
-
-export function parseCsvBuffer(buffer: ArrayBufferLike): Record<string, string>[] {
-  if (isLikelyXlsx(buffer)) {
-    throw new Error("CSV 파싱 오류: 업로드한 파일이 XLSX 형식입니다. CSV(쉼표로 분리)로 저장한 파일을 업로드해주세요.");
-  }
-
+function collectCandidates(text: string, delimiters: readonly string[], includeMatrix: boolean): ParseCandidate[] {
   const candidates: ParseCandidate[] = [];
 
-  for (const encoding of ENCODING_CANDIDATES) {
-    const text = decodeWithEncoding(buffer, encoding);
-    if (!text) {
-      continue;
+  const autoHeaderCandidate = parseWithHeader(text);
+  if (autoHeaderCandidate) {
+    candidates.push(autoHeaderCandidate);
+  }
+
+  for (const delimiter of delimiters) {
+    const headerCandidate = parseWithHeader(text, delimiter);
+    if (headerCandidate) {
+      candidates.push(headerCandidate);
     }
 
-    const autoHeaderCandidate = parseWithHeader(text);
-    if (autoHeaderCandidate) {
-      candidates.push(autoHeaderCandidate);
-    }
-
-    for (const delimiter of DELIMITER_CANDIDATES) {
-      const headerCandidate = parseWithHeader(text, delimiter);
-      if (headerCandidate) {
-        candidates.push(headerCandidate);
-      }
-
+    if (includeMatrix) {
       const matrixCandidate = parseWithMatrix(text, delimiter);
       if (matrixCandidate) {
         candidates.push(matrixCandidate);
       }
     }
+  }
+
+  return candidates;
+}
+
+function collectCandidatesFromBuffer(
+  buffer: ArrayBufferLike,
+  encodings: readonly string[],
+  delimiters: readonly string[],
+  includeMatrix: boolean
+): ParseCandidate[] {
+  const candidates: ParseCandidate[] = [];
+
+  for (const encoding of encodings) {
+    const text = decodeWithEncoding(buffer, encoding);
+    if (!text) {
+      continue;
+    }
+    candidates.push(...collectCandidates(text, delimiters, includeMatrix));
+  }
+
+  return candidates;
+}
+
+export async function parseCsvFile(file: File): Promise<Record<string, string>[]> {
+  const buffer = await file.arrayBuffer();
+  return parseCsvBuffer(buffer);
+}
+
+export function parseCsvBuffer(buffer: ArrayBufferLike, options: ParseCsvBufferOptions = {}): Record<string, string>[] {
+  if (isLikelyXlsx(buffer)) {
+    throw new Error("CSV 파싱 오류: 업로드한 파일이 XLSX 형식입니다. CSV(쉼표로 분리)로 저장한 파일을 업로드해주세요.");
+  }
+
+  const defaultEncodings = [...ENCODING_CANDIDATES];
+  const defaultDelimiters = [...DELIMITER_CANDIDATES];
+  const hintedEncodings = uniqueStrings(options.encodings ?? []);
+  const hintedDelimiters = uniqueStrings(options.delimiters ?? []);
+  const exhaustive = options.exhaustive ?? true;
+  const includeMatrix = options.includeMatrix ?? true;
+
+  const candidates: ParseCandidate[] = [];
+
+  const prioritizedEncodings = hintedEncodings.length > 0 ? hintedEncodings : defaultEncodings;
+  const prioritizedDelimiters = hintedDelimiters.length > 0 ? hintedDelimiters : defaultDelimiters;
+  candidates.push(...collectCandidatesFromBuffer(buffer, prioritizedEncodings, prioritizedDelimiters, includeMatrix));
+
+  if (exhaustive && (hintedEncodings.length > 0 || hintedDelimiters.length > 0)) {
+    candidates.push(...collectCandidatesFromBuffer(buffer, defaultEncodings, defaultDelimiters, includeMatrix));
   }
 
   if (candidates.length === 0) {

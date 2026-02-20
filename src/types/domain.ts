@@ -49,10 +49,33 @@ export interface RegionStat {
 export interface GrowthCustomer {
   bizNo: string;
   customerName: string;
+  agency: string;
   firstOrderAmount: number;
   cumulativeAmount: number;
+  purchaseCount: number;
   growthMultiplier: number;
   highPotential: boolean;
+}
+
+export interface GrowthScatterPoint {
+  bizNo: string;
+  customerName: string;
+  agency: string;
+  firstOrderAmount: number;
+  cumulativeAmount: number;
+  purchaseCount: number;
+  growthMultiplier: number;
+  isSelectedAgency: boolean;
+}
+
+export interface GrowthScatterSummary {
+  points: GrowthScatterPoint[];
+  averageGrowthMultiplier: number;
+  averagePurchaseCount: number;
+  selectedAverageGrowthMultiplier: number;
+  selectedAveragePurchaseCount: number;
+  minFirstOrderAmount: number;
+  minPurchaseCount: number;
 }
 
 export interface MonthlyNewProduct {
@@ -70,6 +93,7 @@ export interface AnalysisResult {
   regionMain: RegionStat[];
   regionExpansion: RegionStat[];
   growthCustomers: GrowthCustomer[];
+  growthScatter: GrowthScatterSummary;
   monthlyNewProducts: MonthlyNewProduct[];
   crossSellRatio: {
     solo: number;

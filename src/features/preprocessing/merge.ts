@@ -74,7 +74,7 @@ export function prepareCustomers(rows: RawCsvRecord[], orders: PreparedOrder[]):
     return {
       bizNo,
       agency,
-      customerName: pickValue(row, ["고객명", "상호", "고객사명", "customer_name", "company_name"]),
+      customerName: pickValue(row, ["회사명", "고객명", "상호", "고객사명", "customer_name", "company_name"]),
       firstOrderAmount: firstOrderRaw > 0 ? firstOrderRaw : imputedExact || imputedBiz
     };
   });

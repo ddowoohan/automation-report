@@ -4,10 +4,47 @@ import { NextResponse } from "next/server";
 
 import { validateCsvRows } from "@/features/preprocessing/csv-schema";
 import { buildAnalysisDataset, prepareCustomers, prepareOrders, prepareProducts } from "@/features/preprocessing/merge";
-import { parseCsvBuffer } from "@/lib/csv/parse";
+import { parseCsvBuffer, type ParseCsvBufferOptions } from "@/lib/csv/parse";
 import { createSession } from "@/lib/session-store";
 
 export const runtime = "nodejs";
+
+type CsvSource = "orders" | "customers" | "products";
+
+interface DefaultDataCache {
+  signature: string;
+  dataset: ReturnType<typeof buildAnalysisDataset>;
+  agencies: string[];
+  counts: {
+    orders: number;
+    customers: number;
+    products: number;
+  };
+  defaultFiles: {
+    orders: string;
+    customers: string;
+    products: string;
+  };
+}
+
+const DEFAULT_PARSE_HINTS: Record<CsvSource, ParseCsvBufferOptions> = {
+  orders: {
+    encodings: ["utf-8", "utf-16le"],
+    delimiters: [",", "\t"]
+  },
+  customers: {
+    encodings: ["utf-16le", "cp949", "utf-8"],
+    delimiters: ["\t", ","],
+    includeMatrix: false
+  },
+  products: {
+    encodings: ["utf-16le", "cp949", "utf-8"],
+    delimiters: ["\t", ","],
+    includeMatrix: false
+  }
+};
+
+let defaultDataCache: DefaultDataCache | null = null;
 
 function normalizeName(name: string): string {
   return name
@@ -29,6 +66,23 @@ function findCsvFile(files: string[], keywords: string[]): string | null {
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return Uint8Array.from(buf).buffer;
+}
+
+function parseValidatedRows(buffer: Buffer, source: CsvSource) {
+  const parseHint = DEFAULT_PARSE_HINTS[source];
+  const arrayBuffer = toArrayBuffer(buffer);
+
+  try {
+    const hintedRows = parseCsvBuffer(arrayBuffer, { ...parseHint, exhaustive: false });
+    return validateCsvRows(hintedRows, source);
+  } catch {
+    const fallbackRows = parseCsvBuffer(arrayBuffer);
+    return validateCsvRows(fallbackRows, source);
+  }
+}
+
+function buildSignature(fileStats: Array<{ name: string; size: number; mtimeMs: number }>): string {
+  return fileStats.map((file) => `${file.name}:${file.size}:${Math.floor(file.mtimeMs)}`).join("|");
 }
 
 export async function POST() {
@@ -58,21 +112,41 @@ export async function POST() {
       );
     }
 
-    const [ordersBuffer, customersBuffer, productsBuffer] = await Promise.all([
-      fs.readFile(path.join(docsDir, ordersFile)),
-      fs.readFile(path.join(docsDir, customersFile)),
-      fs.readFile(path.join(docsDir, productsFile))
+    const ordersPath = path.join(docsDir, ordersFile);
+    const customersPath = path.join(docsDir, customersFile);
+    const productsPath = path.join(docsDir, productsFile);
+
+    const [ordersStat, customersStat, productsStat] = await Promise.all([
+      fs.stat(ordersPath),
+      fs.stat(customersPath),
+      fs.stat(productsPath)
     ]);
 
-    const [orderRowsRaw, customerRowsRaw, productRowsRaw] = [
-      parseCsvBuffer(toArrayBuffer(ordersBuffer)),
-      parseCsvBuffer(toArrayBuffer(customersBuffer)),
-      parseCsvBuffer(toArrayBuffer(productsBuffer))
-    ];
+    const signature = buildSignature([
+      { name: ordersFile, size: ordersStat.size, mtimeMs: ordersStat.mtimeMs },
+      { name: customersFile, size: customersStat.size, mtimeMs: customersStat.mtimeMs },
+      { name: productsFile, size: productsStat.size, mtimeMs: productsStat.mtimeMs }
+    ]);
 
-    const orderRows = validateCsvRows(orderRowsRaw, "orders");
-    const customerRows = validateCsvRows(customerRowsRaw, "customers");
-    const productRows = validateCsvRows(productRowsRaw, "products");
+    if (defaultDataCache && defaultDataCache.signature === signature) {
+      const sessionId = createSession(defaultDataCache.dataset);
+      return NextResponse.json({
+        sessionId,
+        agencies: defaultDataCache.agencies,
+        counts: defaultDataCache.counts,
+        defaultFiles: defaultDataCache.defaultFiles
+      });
+    }
+
+    const [ordersBuffer, customersBuffer, productsBuffer] = await Promise.all([
+      fs.readFile(ordersPath),
+      fs.readFile(customersPath),
+      fs.readFile(productsPath)
+    ]);
+
+    const orderRows = parseValidatedRows(ordersBuffer, "orders");
+    const customerRows = parseValidatedRows(customersBuffer, "customers");
+    const productRows = parseValidatedRows(productsBuffer, "products");
 
     const orders = prepareOrders(orderRows);
     const customers = prepareCustomers(customerRows, orders);
@@ -82,20 +156,30 @@ export async function POST() {
     const sessionId = createSession(dataset);
 
     const agencies = Array.from(new Set(dataset.orders.map((order) => order.agency))).sort((a, b) => a.localeCompare(b, "ko-KR"));
+    const counts = {
+      orders: dataset.orders.length,
+      customers: dataset.customers.length,
+      products: dataset.products.length
+    };
+    const defaultFiles = {
+      orders: ordersFile,
+      customers: customersFile,
+      products: productsFile
+    };
+
+    defaultDataCache = {
+      signature,
+      dataset,
+      agencies,
+      counts,
+      defaultFiles
+    };
 
     return NextResponse.json({
       sessionId,
       agencies,
-      counts: {
-        orders: dataset.orders.length,
-        customers: dataset.customers.length,
-        products: dataset.products.length
-      },
-      defaultFiles: {
-        orders: ordersFile,
-        customers: customersFile,
-        products: productsFile
-      }
+      counts,
+      defaultFiles
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "알 수 없는 오류";
