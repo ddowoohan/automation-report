@@ -32,6 +32,7 @@ export function prepareOrders(rows: RawCsvRecord[]): PreparedOrder[] {
       orderNo: pickValue(row, ["수주번호", "주문번호", "오더번호", "order_no", "orderno"]),
       bizNo: pickValue(row, ["사업자 등록번호", "사업자등록번호", "사업자번호", "biz_no", "business_no"]),
       agency,
+      memberType: pickValue(row, ["회원구분", "회원 구분", "member_type", "membership_type"]),
       orderAmount: parseNumber(pickValue(row, ["수주금액", "주문금액", "매출금액", "합계금액", "order_amount", "sales_amount"])),
       orderDate: parseDate(pickValue(row, ["기준일자", "기준일자일", "주문일자", "수주일자", "일자", "date", "order_date"])),
       city: pickValue(row, ["시", "시도", "광역시도", "city"]),
@@ -75,6 +76,27 @@ export function prepareCustomers(rows: RawCsvRecord[], orders: PreparedOrder[]):
       bizNo,
       agency,
       customerName: pickValue(row, ["회사명", "고객명", "상호", "고객사명", "customer_name", "company_name"]),
+      memberType: pickValue(row, ["회원구분", "회원 구분", "member_type", "membership_type"]),
+      industryMajor: pickValue(row, [
+        "업태(어드민)",
+        "업태",
+        "대분류업종",
+        "업종(대분류)",
+        "업종대분류",
+        "업종",
+        "industry_major",
+        "industry"
+      ]),
+      industryDetail: pickValue(row, [
+        "종목(어드민)",
+        "종목",
+        "세부업종",
+        "중분류업종",
+        "업종(중분류)",
+        "업종(세부)",
+        "industry_detail",
+        "sub_industry"
+      ]),
       firstOrderAmount: firstOrderRaw > 0 ? firstOrderRaw : imputedExact || imputedBiz
     };
   });

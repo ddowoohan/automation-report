@@ -2,10 +2,12 @@ import type {
   AnalysisDataset,
   AnalysisResult,
   BenchmarkMode,
+  CommonRegionIndustry,
   GrowthCustomer,
   GrowthScatterSummary,
   KpiCard,
   MonthlyNewProduct,
+  RegionOpportunityStat,
   RegionStat
 } from "@/types/domain";
 import { getClub1000Agencies } from "@/features/preprocessing/agency-normalization";
@@ -180,26 +182,265 @@ function buildGrowthScatter(metrics: CustomerMetric[], agency: string): GrowthSc
   };
 }
 
-function regionStatsFromOrders(orders: AnalysisDataset["orders"]): { all: RegionStat[]; main: RegionStat[]; expansion: RegionStat[] } {
-  const total = orders.reduce((sum, order) => sum + order.orderAmount, 0);
+const REGION_SCOPE_EXTENSIONS: Record<string, string[]> = {
+  부산광역시: ["부산광역시", "경상남도"],
+  대전광역시: ["대전광역시", "충청북도", "충청남도"],
+  대구광역시: ["대구광역시", "경상북도"],
+  광주광역시: ["광주광역시", "전라북도", "전라남도"]
+};
 
+function normalizeLabel(value: string): string {
+  return value.replace(/\s+/g, "").trim();
+}
+
+function normalizeMetro(value: string): string {
+  const normalized = normalizeLabel(value);
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.startsWith("부산")) return "부산광역시";
+  if (normalized.startsWith("대전")) return "대전광역시";
+  if (normalized.startsWith("대구")) return "대구광역시";
+  if (normalized.startsWith("광주")) return "광주광역시";
+  if (normalized.startsWith("서울")) return "서울특별시";
+  if (normalized.startsWith("인천")) return "인천광역시";
+  if (normalized.startsWith("울산")) return "울산광역시";
+  if (normalized.startsWith("세종")) return "세종특별자치시";
+  if (normalized.startsWith("경기")) return "경기도";
+  if (normalized.startsWith("강원")) return "강원특별자치도";
+  if (normalized.startsWith("충북")) return "충청북도";
+  if (normalized.startsWith("충남")) return "충청남도";
+  if (normalized.startsWith("전북")) return "전라북도";
+  if (normalized.startsWith("전남")) return "전라남도";
+  if (normalized.startsWith("경북")) return "경상북도";
+  if (normalized.startsWith("경남")) return "경상남도";
+  if (normalized.startsWith("제주")) return "제주특별자치도";
+
+  return value.trim();
+}
+
+function regionLabel(order: AnalysisDataset["orders"][number]): string {
+  const city = normalizeMetro(order.city);
+  const district = order.district?.trim();
+  if (city && district) {
+    return `${city} ${district}`;
+  }
+  return city || district || order.dong || "기타";
+}
+
+function regionStatsFromOrders(orders: AnalysisDataset["orders"]): { all: RegionStat[] } {
+  const total = orders.reduce((sum, order) => sum + order.orderAmount, 0);
   const grouped = new Map<string, number>();
+
   for (const order of orders) {
-    const region = [order.city, order.district, order.dong].filter(Boolean).join(" ");
-    if (!region) {
-      continue;
-    }
+    const region = regionLabel(order);
     grouped.set(region, (grouped.get(region) ?? 0) + order.orderAmount);
   }
 
   const stats = Array.from(grouped.entries())
-    .map(([region, sales]) => ({ region, sales, share: total > 0 ? (sales / total) * 100 : 0 }))
+    .map(([region, sales]) => ({
+      region,
+      sales,
+      share: total > 0 ? (sales / total) * 100 : 0
+    }))
     .sort((a, b) => b.sales - a.sales);
 
+  return { all: stats };
+}
+
+function inferAgencyMetro(agency: string, orders: AnalysisDataset["orders"]): string {
+  const normalizedAgency = normalizeLabel(agency);
+  if (normalizedAgency.includes("부산")) return "부산광역시";
+  if (normalizedAgency.includes("대전")) return "대전광역시";
+  if (normalizedAgency.includes("대구")) return "대구광역시";
+  if (normalizedAgency.includes("광주")) return "광주광역시";
+
+  const citySales = new Map<string, number>();
+  for (const order of orders) {
+    const city = normalizeMetro(order.city);
+    if (!city) {
+      continue;
+    }
+    citySales.set(city, (citySales.get(city) ?? 0) + order.orderAmount);
+  }
+
+  return Array.from(citySales.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+}
+
+function scopedMetros(baseMetro: string): Set<string> {
+  const scope = REGION_SCOPE_EXTENSIONS[baseMetro] ?? [baseMetro];
+  return new Set(scope.map((city) => normalizeMetro(city)));
+}
+
+function classifyMemberType(memberType: string): "assigned" | "registered" | "unknown" {
+  const normalized = normalizeLabel(memberType);
+  if (normalized.includes("배정")) {
+    return "assigned";
+  }
+  if (normalized.includes("등록")) {
+    return "registered";
+  }
+  return "unknown";
+}
+
+interface RegionBucket {
+  region: string;
+  sales: number;
+  assignedSales: number;
+  registeredSales: number;
+  assignedBizNos: Set<string>;
+  registeredBizNos: Set<string>;
+  industryMap: Map<string, { sales: number; bizNos: Set<string> }>;
+}
+
+function toOpportunityStats(bucket: RegionBucket, scopeTotalSales: number): RegionOpportunityStat {
+  const assignedCustomerCount = bucket.assignedBizNos.size;
+  const registeredCustomerCount = bucket.registeredBizNos.size;
+
   return {
-    all: stats,
-    main: stats.slice(0, 8),
-    expansion: [...stats].sort((a, b) => a.share - b.share).slice(0, 5)
+    region: bucket.region,
+    sales: bucket.sales,
+    share: scopeTotalSales > 0 ? (bucket.sales / scopeTotalSales) * 100 : 0,
+    assignedSales: bucket.assignedSales,
+    registeredSales: bucket.registeredSales,
+    assignedRegisteredRatio: bucket.registeredSales > 0 ? bucket.assignedSales / bucket.registeredSales : 0,
+    assignedCustomerCount,
+    registeredCustomerCount,
+    customerGap: assignedCustomerCount - registeredCustomerCount
+  };
+}
+
+function topIndustriesFromBucket(bucket: RegionBucket): CommonRegionIndustry["topIndustries"] {
+  const total = bucket.sales;
+  return Array.from(bucket.industryMap.entries())
+    .map(([industry, values]) => ({
+      industry,
+      sales: values.sales,
+      customerCount: values.bizNos.size,
+      share: total > 0 ? (values.sales / total) * 100 : 0
+    }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 3);
+}
+
+function buildRegionOpportunities(
+  dataset: AnalysisDataset,
+  agency: string
+): {
+  regionMain: RegionOpportunityStat[];
+  regionExpansion: RegionOpportunityStat[];
+  regionRegistrationPotential: RegionOpportunityStat[];
+  regionCommonIndustries: CommonRegionIndustry[];
+} {
+  const selectedAgencyOrders = agencyOrders(dataset, agency);
+  const agencyMetro = inferAgencyMetro(agency, selectedAgencyOrders);
+  const scope = scopedMetros(agencyMetro);
+  const scopedOrders =
+    agencyMetro && scope.size > 0
+      ? selectedAgencyOrders.filter((order) => scope.has(normalizeMetro(order.city)))
+      : selectedAgencyOrders;
+
+  const customersByExact = new Map(dataset.customers.map((customer) => [`${customer.bizNo}::${customer.agency}`, customer]));
+  const customersByBiz = new Map<string, AnalysisDataset["customers"][number]>();
+  for (const customer of dataset.customers) {
+    if (!customersByBiz.has(customer.bizNo)) {
+      customersByBiz.set(customer.bizNo, customer);
+    }
+  }
+
+  const scopeTotalSales = scopedOrders.reduce((sum, order) => sum + order.orderAmount, 0);
+  const buckets = new Map<string, RegionBucket>();
+
+  for (const order of scopedOrders) {
+    const region = regionLabel(order);
+    const bucket = buckets.get(region) ?? {
+      region,
+      sales: 0,
+      assignedSales: 0,
+      registeredSales: 0,
+      assignedBizNos: new Set<string>(),
+      registeredBizNos: new Set<string>(),
+      industryMap: new Map<string, { sales: number; bizNos: Set<string> }>()
+    };
+
+    bucket.sales += order.orderAmount;
+
+    const customer =
+      customersByExact.get(`${order.bizNo}::${order.agency}`) ??
+      customersByBiz.get(order.bizNo);
+    const memberType = order.memberType || customer?.memberType || "";
+    const memberClass = classifyMemberType(memberType);
+    if (memberClass === "assigned") {
+      bucket.assignedSales += order.orderAmount;
+      bucket.assignedBizNos.add(order.bizNo);
+    } else if (memberClass === "registered") {
+      bucket.registeredSales += order.orderAmount;
+      bucket.registeredBizNos.add(order.bizNo);
+    }
+
+    const industry = customer?.industryDetail || customer?.industryMajor || "미분류";
+    const industryBucket = bucket.industryMap.get(industry) ?? { sales: 0, bizNos: new Set<string>() };
+    industryBucket.sales += order.orderAmount;
+    industryBucket.bizNos.add(order.bizNo);
+    bucket.industryMap.set(industry, industryBucket);
+
+    buckets.set(region, bucket);
+  }
+
+  const allStats = Array.from(buckets.values()).map((bucket) => toOpportunityStats(bucket, scopeTotalSales));
+  const statsByRegion = new Map(allStats.map((stat) => [stat.region, stat]));
+
+  const regionMain = [...allStats].sort((a, b) => b.sales - a.sales).slice(0, 5);
+
+  const regionExpansion = allStats
+    .filter((stat) => stat.assignedRegisteredRatio >= 0.8 && stat.assignedRegisteredRatio <= 1.2 && stat.sales > 0)
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 5);
+
+  const regionRegistrationPotential = allStats
+    .filter((stat) => stat.customerGap > 0)
+    .sort((a, b) => b.customerGap - a.customerGap || b.sales - a.sales)
+    .slice(0, 5);
+
+  const overlapCounter = new Map<string, number>();
+  for (const row of regionMain) overlapCounter.set(row.region, (overlapCounter.get(row.region) ?? 0) + 1);
+  for (const row of regionExpansion) overlapCounter.set(row.region, (overlapCounter.get(row.region) ?? 0) + 1);
+  for (const row of regionRegistrationPotential) overlapCounter.set(row.region, (overlapCounter.get(row.region) ?? 0) + 1);
+
+  const rankedCommonRegions = Array.from(overlapCounter.entries()).sort((a, b) => {
+    const overlapDiff = b[1] - a[1];
+    if (overlapDiff !== 0) {
+      return overlapDiff;
+    }
+    return (statsByRegion.get(b[0])?.sales ?? 0) - (statsByRegion.get(a[0])?.sales ?? 0);
+  });
+
+  const commonCandidates = rankedCommonRegions.filter(([, count]) => count >= 2);
+  const fallbackCandidates = rankedCommonRegions.filter(([, count]) => count < 2);
+  const selectedCommon = [...commonCandidates];
+  for (const entry of fallbackCandidates) {
+    if (selectedCommon.length >= 4) {
+      break;
+    }
+    selectedCommon.push(entry);
+  }
+
+  const regionCommonIndustries: CommonRegionIndustry[] = selectedCommon.slice(0, 4).map(([region, overlapCount]) => {
+    const bucket = buckets.get(region);
+    return {
+      region,
+      overlapCount,
+      totalSales: bucket?.sales ?? 0,
+      topIndustries: bucket ? topIndustriesFromBucket(bucket) : []
+    };
+  });
+
+  return {
+    regionMain,
+    regionExpansion,
+    regionRegistrationPotential,
+    regionCommonIndustries
   };
 }
 
@@ -317,17 +558,20 @@ export function calculateAnalysis(dataset: AnalysisDataset, agency: string, benc
   const customerMetrics = buildCustomerMetrics(dataset);
   const growthList = growthCustomers(customerMetrics, agency);
   const growthScatter = buildGrowthScatter(customerMetrics, agency);
-  const regions = regionStatsFromOrders(agencyOrders(dataset, agency));
+  const agencyRegionStats = regionStatsFromOrders(agencyOrders(dataset, agency));
   const b2bRegions = regionStatsFromOrders(dataset.orders);
+  const regionOpportunities = buildRegionOpportunities(dataset, agency);
 
   return {
     agency,
     benchmark,
     kpis: buildKpis(dataset, agency, benchmark, growthList),
     b2bRegionAll: b2bRegions.all,
-    regionAll: regions.all,
-    regionMain: regions.main,
-    regionExpansion: regions.expansion,
+    regionAll: agencyRegionStats.all,
+    regionMain: regionOpportunities.regionMain,
+    regionExpansion: regionOpportunities.regionExpansion,
+    regionRegistrationPotential: regionOpportunities.regionRegistrationPotential,
+    regionCommonIndustries: regionOpportunities.regionCommonIndustries,
     growthCustomers: growthList.slice(0, 20),
     growthScatter,
     monthlyNewProducts: monthlyNewProducts(dataset, agency),

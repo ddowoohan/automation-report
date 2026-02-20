@@ -4,6 +4,7 @@ export interface PreparedOrder {
   orderNo: string;
   bizNo: string;
   agency: string;
+  memberType: string;
   orderAmount: number;
   orderDate: Date | null;
   city: string;
@@ -15,6 +16,9 @@ export interface PreparedCustomer {
   bizNo: string;
   agency: string;
   customerName: string;
+  memberType: string;
+  industryMajor: string;
+  industryDetail: string;
   firstOrderAmount: number;
 }
 
@@ -44,6 +48,29 @@ export interface RegionStat {
   region: string;
   sales: number;
   share: number;
+}
+
+export interface RegionOpportunityStat extends RegionStat {
+  assignedSales: number;
+  registeredSales: number;
+  assignedRegisteredRatio: number;
+  assignedCustomerCount: number;
+  registeredCustomerCount: number;
+  customerGap: number;
+}
+
+export interface RegionIndustryStat {
+  industry: string;
+  sales: number;
+  customerCount: number;
+  share: number;
+}
+
+export interface CommonRegionIndustry {
+  region: string;
+  overlapCount: number;
+  totalSales: number;
+  topIndustries: RegionIndustryStat[];
 }
 
 export interface GrowthCustomer {
@@ -90,8 +117,10 @@ export interface AnalysisResult {
   kpis: KpiCard[];
   b2bRegionAll: RegionStat[];
   regionAll: RegionStat[];
-  regionMain: RegionStat[];
-  regionExpansion: RegionStat[];
+  regionMain: RegionOpportunityStat[];
+  regionExpansion: RegionOpportunityStat[];
+  regionRegistrationPotential: RegionOpportunityStat[];
+  regionCommonIndustries: CommonRegionIndustry[];
   growthCustomers: GrowthCustomer[];
   growthScatter: GrowthScatterSummary;
   monthlyNewProducts: MonthlyNewProduct[];

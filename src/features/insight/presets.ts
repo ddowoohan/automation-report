@@ -3,6 +3,7 @@ export type InsightPresetId =
   | "geo_insight"
   | "region_interpretation"
   | "region_insight"
+  | "region_common_industry_insight"
   | "growth_interpretation"
   | "cross_sell_interpretation"
   | "weak_products_interpretation"
@@ -34,16 +35,23 @@ export const INSIGHT_PRESETS: Record<InsightPresetId, InsightPreset> = {
   region_interpretation: {
     id: "region_interpretation",
     title: "핵심/공략 지역 Top5 해석",
-    objective: "상위/저비중 지역의 구조적 차이를 해석한다.",
-    focus: ["핵심 지역 비중", "공략 필요 지역 격차", "권역별 난이도"],
+    objective: "핵심비중/추가매출/등록회원추가 지역 구조를 해석한다.",
+    focus: ["핵심비중 Top5", "추가 매출 발생 가능 지역 Top5", "등록회원 추가 발생 가능 지역 Top5"],
     outputHint: "해석형 문장 위주로 3~4개 불릿"
   },
   region_insight: {
     id: "region_insight",
     title: "핵심/공략 지역 Top5 인사이트",
-    objective: "권역별 실행 전략을 제시한다.",
-    focus: ["유지 전략", "신규 전환 전략", "권역별 KPI 운영"],
+    objective: "지역 리스트 기반 실행 전략을 제시한다.",
+    focus: ["핵심 지역 유지 전략", "추가 매출 발생 가능 지역 공략 전략", "등록회원 확장 전략"],
     outputHint: "실행형 제안 3~4개 불릿"
+  },
+  region_common_industry_insight: {
+    id: "region_common_industry_insight",
+    title: "공통 지역 업종 분포 배경 해석",
+    objective: "공통 지역의 주요 업종이 많은 이유를 설명한다.",
+    focus: ["공통 지역 3~4개", "지역별 상위 업종 3개", "업종 분포 배경"],
+    outputHint: "지역별 1문장 근거 + 가능하면 출처 표기"
   },
   growth_interpretation: {
     id: "growth_interpretation",
@@ -86,4 +94,3 @@ export function fallbackMessages(agency: string, preset: InsightPreset): string[
     `권장 출력 형식: ${preset.outputHint}`
   ];
 }
-

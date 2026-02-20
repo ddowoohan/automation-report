@@ -94,13 +94,14 @@ export function DashboardApp() {
   const insightBatchKeyRef = useRef<string>("");
   const growthSegmentKeyRef = useRef<string>("");
   const hasAnalysis = Boolean(analysis);
-  type SectionId = "geo" | "region" | "growth" | "monthly" | "weakProduct" | "strongProduct";
+  type SectionId = "geo" | "region" | "regionCommon" | "growth" | "monthly" | "weakProduct" | "strongProduct";
   type MessageKind = "interpretation" | "insight";
   type InsightPresetId =
     | "geo_interpretation"
     | "geo_insight"
     | "region_interpretation"
     | "region_insight"
+    | "region_common_industry_insight"
     | "growth_interpretation"
     | "cross_sell_interpretation"
     | "weak_products_interpretation"
@@ -115,6 +116,7 @@ export function DashboardApp() {
     { section: "geo", kind: "insight", presetId: "geo_insight" },
     { section: "region", kind: "interpretation", presetId: "region_interpretation" },
     { section: "region", kind: "insight", presetId: "region_insight" },
+    { section: "regionCommon", kind: "insight", presetId: "region_common_industry_insight" },
     { section: "monthly", kind: "interpretation", presetId: "cross_sell_interpretation" },
     { section: "weakProduct", kind: "interpretation", presetId: "weak_products_interpretation" },
     { section: "strongProduct", kind: "interpretation", presetId: "strong_products_interpretation" }
@@ -122,6 +124,7 @@ export function DashboardApp() {
   const EMPTY_MESSAGES: Record<SectionId, InsightMessage[]> = {
     geo: [],
     region: [],
+    regionCommon: [],
     growth: [],
     monthly: [],
     weakProduct: [],
@@ -133,6 +136,8 @@ export function DashboardApp() {
 
   const regionMainTop5 = useMemo(() => analysis?.regionMain.slice(0, 5) ?? [], [analysis]);
   const regionExpansionTop5 = useMemo(() => analysis?.regionExpansion.slice(0, 5) ?? [], [analysis]);
+  const regionRegistrationPotentialTop5 = useMemo(() => analysis?.regionRegistrationPotential.slice(0, 5) ?? [], [analysis]);
+  const regionCommonIndustryTop = useMemo(() => analysis?.regionCommonIndustries.slice(0, 4) ?? [], [analysis]);
 
   const geoInterpretationLines = useMemo(() => {
     if (!analysis) {
@@ -183,38 +188,44 @@ export function DashboardApp() {
   const regionInterpretationLines = useMemo(() => {
     if (!analysis) {
       return [
-        "핵심 비중 지역과 공략 필요 지역을 동시에 보면 유지/확장 전략을 나눌 수 있습니다.",
-        "상위 권역과 저비중 권역 간 격차를 통해 신규 공략 난이도를 판단합니다."
+        "핵심비중/추가매출/등록회원 확장 지역을 함께 보면 실행 우선순위를 나눌 수 있습니다.",
+        "공통으로 반복 노출되는 지역은 단기 실행 타깃으로 해석할 수 있습니다."
       ];
     }
 
     const main = regionMainTop5[0];
     const expansion = regionExpansionTop5[0];
+    const registration = regionRegistrationPotentialTop5[0];
+    const commonTop = regionCommonIndustryTop[0];
 
     return [
-      `핵심 비중 1위 지역은 ${main ? `${main.region} (${main.share.toFixed(1)}%)` : "데이터 없음"} 입니다.`,
-      `공략 필요 1순위는 ${expansion ? `${expansion.region} (${expansion.share.toFixed(2)}%)` : "데이터 없음"}로, 저점 권역 전환이 핵심입니다.`
+      `핵심비중 1위는 ${main ? `${main.region} (${main.share.toFixed(1)}%)` : "데이터 없음"}입니다.`,
+      `추가 매출 발생 가능 1순위는 ${expansion ? `${expansion.region} (배정/등록 비율 ${expansion.assignedRegisteredRatio.toFixed(2)})` : "데이터 없음"}입니다.`,
+      `등록회원 추가 가능 1순위는 ${registration ? `${registration.region} (고객수 격차 ${registration.customerGap})` : "데이터 없음"}입니다.`,
+      `공통 후보 상위 지역은 ${commonTop ? `${commonTop.region} (중복 ${commonTop.overlapCount}회)` : "데이터 없음"}입니다.`
     ];
-  }, [analysis, regionMainTop5, regionExpansionTop5]);
+  }, [analysis, regionMainTop5, regionExpansionTop5, regionRegistrationPotentialTop5, regionCommonIndustryTop]);
 
   const regionInsightItems = useMemo(() => {
     if (!analysis) {
       return [
-        "핵심 지역은 객단가 유지 전략으로 방어합니다.",
-        "저비중 지역은 체험/첫구매 전환 캠페인으로 진입 장벽을 낮춥니다.",
-        "권역별 KPI를 분리해 주간 단위로 추적합니다."
+        "핵심비중 지역은 유지, 추가매출 가능 지역은 전환, 등록회원 확장 지역은 풀 확장 전략으로 운영합니다.",
+        "공통 지역은 업종 맞춤형 제안으로 단기 실행 우선순위를 높입니다.",
+        "지역군별 KPI를 분리해 주간 단위로 추적합니다."
       ];
     }
 
-    const mainNames = regionMainTop5.slice(0, 2).map((region) => region.region).join(", ") || "핵심 권역";
-    const expansionNames = regionExpansionTop5.slice(0, 2).map((region) => region.region).join(", ") || "확장 권역";
+    const mainNames = regionMainTop5.slice(0, 2).map((region) => region.region).join(", ") || "핵심 지역";
+    const expansionNames = regionExpansionTop5.slice(0, 2).map((region) => region.region).join(", ") || "추가 매출 지역";
+    const registrationNames =
+      regionRegistrationPotentialTop5.slice(0, 2).map((region) => region.region).join(", ") || "등록회원 확장 지역";
 
     return [
       `${mainNames}는 재구매/교체 수요 중심 제안으로 점유율을 유지합니다.`,
-      `${expansionNames}는 신규 고객 첫 주문 유도형 제안으로 침투율을 높입니다.`,
-      "핵심/확장 권역 캠페인을 분리해 동일 예산 대비 전환 효율을 높입니다."
+      `${expansionNames}는 배정/등록 균형 구간이라 업종별 패키지 제안으로 매출 확장을 노립니다.`,
+      `${registrationNames}는 등록회원 전환 캠페인으로 고객 풀을 넓히는 전략이 유효합니다.`
     ];
-  }, [analysis, regionExpansionTop5, regionMainTop5]);
+  }, [analysis, regionExpansionTop5, regionMainTop5, regionRegistrationPotentialTop5]);
 
   const growthScatter = analysis?.growthScatter;
   const growthScatterPoints = growthScatter?.points ?? [];
@@ -403,7 +414,17 @@ export function DashboardApp() {
         return {
           ...base,
           regionMainTop5: currentAnalysis.regionMain.slice(0, 5),
-          regionExpansionTop5: currentAnalysis.regionExpansion.slice(0, 5)
+          regionExpansionTop5: currentAnalysis.regionExpansion.slice(0, 5),
+          regionRegistrationPotentialTop5: currentAnalysis.regionRegistrationPotential.slice(0, 5),
+          regionCommonIndustries: currentAnalysis.regionCommonIndustries.slice(0, 4)
+        };
+      case "region_common_industry_insight":
+        return {
+          ...base,
+          regionMainTop5: currentAnalysis.regionMain.slice(0, 5),
+          regionExpansionTop5: currentAnalysis.regionExpansion.slice(0, 5),
+          regionRegistrationPotentialTop5: currentAnalysis.regionRegistrationPotential.slice(0, 5),
+          regionCommonIndustries: currentAnalysis.regionCommonIndustries.slice(0, 4)
         };
       case "growth_interpretation":
         return {
@@ -860,22 +881,22 @@ export function DashboardApp() {
 
         <Card className="border-stone-200 bg-white shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg text-stone-900">2. 핵심 비중 TOP 5 / 공략 필요 지역 TOP 5</CardTitle>
+            <CardTitle className="text-lg text-stone-900">2. 핵심비중 / 추가 매출 / 등록회원 확장 지역 분석</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
               <p className="text-xs font-semibold text-muted-foreground">2-1. 시각화</p>
-              <div className="grid gap-4 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-3">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">핵심 지역 비중 TOP 5</CardTitle>
+                    <CardTitle className="text-base">핵심비중 TOP 5</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {regionMainTop5.map((row) => (
                       <div key={row.region} className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
                           <span>{row.region}</span>
-                          <span>{row.share.toFixed(1)}%</span>
+                          <span>{row.sales.toLocaleString("ko-KR")}원</span>
                         </div>
                         <div className="h-2 rounded-full bg-muted">
                           <div className="h-2 rounded-full bg-accent" style={{ width: `${Math.min(row.share, 100)}%` }} />
@@ -888,24 +909,86 @@ export function DashboardApp() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">공략 필요 지역 TOP 5</CardTitle>
+                    <CardTitle className="text-base">추가 매출 발생 가능 지역 TOP 5</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {regionExpansionTop5.map((row) => (
                       <div key={row.region} className="flex items-center justify-between rounded-md bg-orange-50 px-3 py-2 text-sm">
-                        <span>{row.region}</span>
-                        <span className="font-semibold text-orange-700">{row.share.toFixed(2)}%</span>
+                        <div>
+                          <p className="font-medium">{row.region}</p>
+                          <p className="text-xs text-muted-foreground">배정/등록 비율 {row.assignedRegisteredRatio.toFixed(2)}</p>
+                        </div>
+                        <span className="font-semibold text-orange-700">{row.sales.toLocaleString("ko-KR")}원</span>
                       </div>
                     ))}
                     {!regionExpansionTop5.length ? <p className="text-sm text-muted-foreground">표시할 데이터가 없습니다.</p> : null}
                   </CardContent>
                 </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">등록회원 추가 발생 가능 지역 TOP 5</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {regionRegistrationPotentialTop5.map((row) => (
+                      <div key={row.region} className="flex items-center justify-between rounded-md bg-teal-50 px-3 py-2 text-sm">
+                        <div>
+                          <p className="font-medium">{row.region}</p>
+                          <p className="text-xs text-muted-foreground">
+                            고객수 격차(배정-등록) {row.customerGap}
+                          </p>
+                        </div>
+                        <span className="font-semibold text-teal-700">{row.sales.toLocaleString("ko-KR")}원</span>
+                      </div>
+                    ))}
+                    {!regionRegistrationPotentialTop5.length ? <p className="text-sm text-muted-foreground">표시할 데이터가 없습니다.</p> : null}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-violet-300 bg-violet-50/60 p-4">
+              <p className="mb-2 text-sm font-semibold text-violet-900">2-2. 공통 지역(3~4개) 및 상위 업종 분포 (GPT Pro 활용)</p>
+              {regionCommonIndustryTop.length === 0 ? (
+                <p className="text-sm text-violet-950">공통 지역 후보가 없습니다.</p>
+              ) : (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {regionCommonIndustryTop.map((region) => (
+                    <div key={region.region} className="rounded-md border bg-white p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900">{region.region}</p>
+                        <span className="text-xs text-slate-500">공통 출현 {region.overlapCount}회</span>
+                      </div>
+                      <p className="mb-2 text-xs text-slate-500">지역 매출 {region.totalSales.toLocaleString("ko-KR")}원</p>
+                      <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+                        {region.topIndustries.map((industry) => (
+                          <li key={`${region.region}-${industry.industry}`}>
+                            {industry.industry} ({industry.sales.toLocaleString("ko-KR")}원, {industry.customerCount}개사)
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3">
+                <Button variant="secondary" disabled={busy || aiBusy || !analysis} onClick={() => triggerSingle("regionCommon", "insight")}>
+                  {aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "업종 분포 배경 해석 생성"}
+                </Button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {insightMessagesBySection.regionCommon.map((msg, idx) => (
+                  <div key={`${msg.role}-region-common-${idx}`} className="rounded-md border bg-white px-3 py-2 text-sm">
+                    <p className="mb-1 text-xs font-semibold text-muted-foreground">{msg.role === "assistant" ? "AI" : "사용자"}</p>
+                    <p>{msg.content}</p>
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-4">
-                <p className="mb-2 text-sm font-semibold text-amber-900">2-2. 데이터 해석 (GPT Pro 활용)</p>
+                <p className="mb-2 text-sm font-semibold text-amber-900">2-3. 데이터 해석 (GPT Pro 활용)</p>
                 <div className="space-y-2 text-sm text-amber-950">
                   {regionInterpretationLines.map((line) => (
                     <p key={line}>{line}</p>
@@ -927,7 +1010,7 @@ export function DashboardApp() {
               </div>
 
               <div className="rounded-xl border border-indigo-300 bg-indigo-50/60 p-4">
-                <p className="mb-2 text-sm font-semibold text-indigo-900">2-3. 인사이트 (GPT Pro 활용)</p>
+                <p className="mb-2 text-sm font-semibold text-indigo-900">2-4. 인사이트 (GPT Pro 활용)</p>
                 <ul className="list-disc space-y-1 pl-5 text-sm text-indigo-950">
                   {regionInsightItems.map((item) => (
                     <li key={item}>{item}</li>

@@ -18,7 +18,8 @@ function buildSystemPrompt(): string {
     "출력은 JSON만 반환한다.",
     '형식: {"messages":["문장1","문장2","문장3"]}',
     "각 문장은 2줄 이내로 짧고 실행 가능해야 한다.",
-    "근거 없는 추측은 피하고, 제공된 데이터 범위 안에서 해석한다."
+    "근거 없는 추측은 피하고, 제공된 데이터 범위 안에서 해석한다.",
+    "외부 검색 근거가 없으면 출처를 임의로 만들지 말고 '출처: 내부 데이터'로 표기한다."
   ].join("\n");
 }
 
@@ -115,4 +116,3 @@ export async function generateInsightMessages(params: GenerateInsightParams): Pr
 
   return fallbackMessages(params.agency, preset);
 }
-
